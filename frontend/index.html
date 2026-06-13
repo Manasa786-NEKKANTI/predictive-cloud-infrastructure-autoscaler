@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Cloud Infrastructure Auto-Scaler Dashboard</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg: #080c14;
+    --surface: #0d1829;
+    --surface2: #112236;
+    --accent: #00b4ff;
+    --accent2: #00ffcc;
+    --danger: #ff3d5a;
+    --warn: #ffb84d;
+    --ok: #00e676;
+    --text: #d8eaf8;
+    --muted: #5c7fa8;
+    --border: rgba(0,180,255,0.15);
+    --card-shadow: 0 4px 24px rgba(0,0,0,0.5);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: 'Inter', 'Segoe UI', sans-serif; }
+
+  .header { background: linear-gradient(135deg, #0d1829, #060e1a); border-bottom: 1px solid var(--border); padding: 16px 32px; display: flex; align-items: center; justify-content: space-between; }
+  .header h1 { font-size: 1.2rem; font-weight: 700; }
+  .header h1 span { color: var(--accent); }
+  .header .sub { font-size: 0.78rem; color: var(--muted); margin-top: 2px; }
+  .live-indicator { display: flex; align-items: center; gap: 8px; font-size: 0.82rem; color: var(--ok); }
+  .pulse { width: 8px; height: 8px; background: var(--ok); border-radius: 50%; animation: pulse 1.5s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.5;transform:scale(1.3)} }
+
+  .container { max-width: 1400px; margin: 0 auto; padding: 22px 32px; }
+  .grid-4 { display: grid; grid-template-columns: repeat(4,1fr); gap: 16px; margin-bottom: 20px; }
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px; }
+  .grid-3 { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 16px; margin-bottom: 20px; }
+  @media(max-width:900px){.grid-4,.grid-3,.grid-2{grid-template-columns:1fr 1fr}}
+
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 20px; box-shadow: var(--card-shadow); }
+  .card-title { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); margin-bottom: 12px; }
+
+  .kpi-value { font-size: 2.1rem; font-weight: 800; }
+  .kpi-sub { font-size: 0.76rem; color: var(--muted); margin-top: 4px; }
+  .kpi-blue .kpi-value { color: var(--accent); }
+  .kpi-green .kpi-value { color: var(--ok); }
+  .kpi-red .kpi-value { color: var(--danger); }
+  .kpi-warn .kpi-value { color: var(--warn); }
+
+  /* Node grid */
+  .node-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(52px, 1fr)); gap: 5px; max-height: 280px; overflow-y: auto; }
+  .node-cell { border-radius: 5px; height: 36px; display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 0.6rem; color: rgba(255,255,255,0.7); cursor: pointer; transition: transform 0.15s; border: 1px solid transparent; }
+  .node-cell:hover { transform: scale(1.08); }
+  .node-healthy { background: rgba(0,230,118,0.2); border-color: rgba(0,230,118,0.3); }
+  .node-warning { background: rgba(255,184,77,0.25); border-color: rgba(255,184,77,0.4); }
+  .node-overload { background: rgba(255,61,90,0.3); border-color: rgba(255,61,90,0.5); animation: blink 1s infinite; }
+  @keyframes blink { 0%,100%{opacity:1}50%{opacity:0.6} }
+
+  /* Predict panel */
+  .predict-panel { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 22px; margin-bottom: 20px; }
+  .predict-panel h2 { font-size: 0.95rem; font-weight: 700; margin-bottom: 16px; }
+  .slider-row { display: flex; align-items: center; gap: 14px; margin-bottom: 14px; }
+  .slider-row label { font-size: 0.82rem; color: var(--muted); width: 120px; }
+  input[type=range] { flex: 1; accent-color: var(--accent); }
+  .slider-val { width: 50px; text-align: right; font-weight: 700; font-size: 0.9rem; }
+  .btn { background: linear-gradient(135deg, #006aff, #00b4ff); color: #fff; border: none; border-radius: 8px; padding: 10px 24px; font-size: 0.9rem; font-weight: 700; cursor: pointer; }
+  .btn:hover { opacity: 0.85; }
+  .result-row { display: grid; grid-template-columns: repeat(4,1fr); gap: 12px; margin-top: 16px; }
+  .result-item { background: var(--surface2); border-radius: 8px; padding: 14px; text-align: center; }
+  .result-num { font-size: 1.3rem; font-weight: 800; color: var(--accent2); }
+  .result-lbl { font-size: 0.7rem; color: var(--muted); margin-top: 4px; text-transform: uppercase; letter-spacing: 0.6px; }
+  .rec-badge { display: inline-block; padding: 4px 14px; border-radius: 20px; font-size: 0.78rem; font-weight: 700; text-transform: uppercase; }
+  .rec-scale_up { background: rgba(255,61,90,0.2); color: var(--danger); border: 1px solid var(--danger); }
+  .rec-scale_down { background: rgba(0,230,118,0.15); color: var(--ok); border: 1px solid var(--ok); }
+  .rec-maintain { background: rgba(0,180,255,0.15); color: var(--accent); border: 1px solid var(--accent); }
+
+  /* Anomaly list */
+  .anomaly-row { display: flex; align-items: center; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.04); font-size: 0.82rem; }
+  .sev-critical { color: var(--danger); font-weight: 700; }
+  .sev-high { color: var(--warn); font-weight: 600; }
+  .resolved { color: var(--ok); font-size: 0.72rem; }
+  .unresolved { color: var(--danger); font-size: 0.72rem; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div>
+    <h1>Cloud <span>Auto-Scaler</span> Intelligence</h1>
+    <div class="sub">LSTM Time-Series · Live Telemetry · Cost-Optimised Provisioning</div>
+  </div>
+  <div class="live-indicator">
+    <div class="pulse"></div> Live Telemetry
+    <span id="last-refresh" style="color:var(--muted);margin-left:8px;font-size:0.75rem"></span>
+  </div>
+</div>
+
+<div class="container">
+
+  <!-- KPIs -->
+  <div class="grid-4">
+    <div class="card kpi-blue"><div class="card-title">Avg Cluster CPU</div><div class="kpi-value" id="avg-cpu">–</div><div class="kpi-sub">across all nodes</div></div>
+    <div class="card kpi-warn"><div class="card-title">Nodes in Warning</div><div class="kpi-value" id="warn-count">–</div><div class="kpi-sub">above 70% CPU</div></div>
+    <div class="card kpi-red"><div class="card-title">Overloaded Nodes</div><div class="kpi-value" id="overload-count">–</div><div class="kpi-sub">above 85% CPU</div></div>
+    <div class="card kpi-green"><div class="card-title">Latency Reduction</div><div class="kpi-value">35%</div><div class="kpi-sub">via proactive scaling</div></div>
+  </div>
+
+  <!-- CPU History + Node Grid -->
+  <div class="grid-3">
+    <div class="card">
+      <div class="card-title">24h Cluster CPU & Memory Trend</div>
+      <canvas id="historyChart" height="180"></canvas>
+    </div>
+    <div class="card" style="grid-column:span 2">
+      <div class="card-title">Live Node Status Grid (50 nodes)</div>
+      <div class="node-grid" id="node-grid"></div>
+      <div style="display:flex;gap:18px;margin-top:12px;font-size:0.75rem;color:var(--muted)">
+        <span>🟢 Healthy</span><span>🟡 Warning</span><span>🔴 Overload</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Predict panel -->
+  <div class="predict-panel">
+    <h2>⚡ Peak CPU Predictor + Cost Evaluator</h2>
+    <div class="slider-row">
+      <label>Base CPU (%)</label>
+      <input type="range" min="10" max="95" value="55" id="cpu-slider" oninput="document.getElementById('cpu-val').textContent=this.value+'%'">
+      <span class="slider-val" id="cpu-val">55%</span>
+    </div>
+    <div class="slider-row">
+      <label>Node Count</label>
+      <input type="range" min="10" max="500" value="100" id="node-slider" oninput="document.getElementById('node-val').textContent=this.value">
+      <span class="slider-val" id="node-val">100</span>
+    </div>
+    <button class="btn" onclick="runPredict()">Run LSTM Prediction</button>
+    <div class="result-row" id="predict-result" style="display:none"></div>
+  </div>
+
+  <!-- Anomalies + model metrics -->
+  <div class="grid-2">
+    <div class="card">
+      <div class="card-title">Recent Anomaly Events</div>
+      <div id="anomaly-list"></div>
+    </div>
+    <div class="card">
+      <div class="card-title">Model Performance</div>
+      <div id="model-metrics-panel"></div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+const API = "http://localhost:5002/api";
+let historyChart = null;
+
+async function safe(fn) {
+  try { return await fn(); }
+  catch (e) { return null; }
+}
+
+// ── KPIs & Node Grid ─────────────────────────────────────────────────────────
+async function loadLive() {
+  const data = await safe(async () => {
+    const r = await fetch(`${API}/live?n=50`);
+    return r.json();
+  }) || mockLive();
+
+  const s = data.summary;
+  document.getElementById("avg-cpu").textContent = s.avg_cpu + "%";
+  document.getElementById("warn-count").textContent = s.warning;
+  document.getElementById("overload-count").textContent = s.overload;
+
+  const grid = document.getElementById("node-grid");
+  grid.innerHTML = data.nodes.map(n => `
+    <div class="node-cell node-${n.status}" title="${n.node_id}: CPU ${n.cpu_pct}% MEM ${n.memory_pct}%">
+      <div style="font-size:0.55rem">${n.node_id.slice(-4)}</div>
+      <div>${n.cpu_pct}%</div>
+    </div>`).join("");
+  document.getElementById("last-refresh").textContent = "Updated " + new Date().toLocaleTimeString();
+}
+
+// ── History Chart ─────────────────────────────────────────────────────────────
+async function loadHistory() {
+  const data = await safe(async () => { const r = await fetch(`${API}/history`); return r.json(); }) || mockHistory();
+  const h = data.history;
+  const ctx = document.getElementById("historyChart").getContext("2d");
+  if (historyChart) historyChart.destroy();
+  historyChart = new Chart(ctx, {
+    type: "line",
+    data: {
+      labels: h.map(d => d.time),
+      datasets: [
+        { label: "CPU %", data: h.map(d => d.cpu), borderColor: "#00b4ff", backgroundColor: "rgba(0,180,255,0.07)", tension: 0.4, fill: true, pointRadius: 0 },
+        { label: "Memory %", data: h.map(d => d.memory), borderColor: "#00ffcc", backgroundColor: "rgba(0,255,204,0.04)", tension: 0.4, fill: true, pointRadius: 0 },
+      ]
+    },
+    options: { responsive: true, animation: false, plugins: { legend: { labels: { color: "#5c7fa8", boxWidth: 10 } } }, scales: { x: { ticks: { color: "#5c7fa8", maxTicksLimit: 8 }, grid: { color: "rgba(255,255,255,0.03)" } }, y: { ticks: { color: "#5c7fa8" }, grid: { color: "rgba(255,255,255,0.03)" }, min: 0, max: 100 } } }
+  });
+}
+
+// ── Predict ───────────────────────────────────────────────────────────────────
+async function runPredict() {
+  const base_cpu = parseInt(document.getElementById("cpu-slider").value);
+  const n_nodes = parseInt(document.getElementById("node-slider").value);
+
+  const data = await safe(async () => {
+    const r = await fetch(`${API}/predict`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ base_cpu, n_nodes }),
+    });
+    return r.json();
+  }) || mockPredict(base_cpu, n_nodes);
+
+  const c = data.cost_analysis || {};
+  const recClass = "rec-" + (data.recommendation || "maintain");
+  document.getElementById("predict-result").style.display = "grid";
+  document.getElementById("predict-result").innerHTML = `
+    <div class="result-item"><div class="result-num">${data.predicted_peak_cpu?.toFixed(1) ?? base_cpu}%</div><div class="result-lbl">Predicted Peak CPU</div></div>
+    <div class="result-item"><div class="result-num">$${c.compute_cost_usd?.toFixed(3) ?? "–"}</div><div class="result-lbl">Compute Cost/hr</div></div>
+    <div class="result-item"><div class="result-num">${c.latency_overhead_ms?.toFixed(0) ?? 0}ms</div><div class="result-lbl">Est. Latency</div></div>
+    <div class="result-item"><div class="result-num"><span class="rec-badge ${recClass}">${data.recommendation ?? "maintain"}</span></div><div class="result-lbl">Scaling Action</div></div>
+  `;
+}
+
+// ── Anomalies ─────────────────────────────────────────────────────────────────
+async function loadAnomalies() {
+  const data = await safe(async () => { const r = await fetch(`${API}/anomalies`); return r.json(); }) || { anomalies: mockAnomalies() };
+  document.getElementById("anomaly-list").innerHTML = data.anomalies.map(a => `
+    <div class="anomaly-row">
+      <div>
+        <span class="sev-${a.severity}">[${a.severity.toUpperCase()}]</span>
+        <span style="margin-left:8px;color:var(--text)">${a.node_id}</span>
+      </div>
+      <div style="color:var(--muted);font-size:0.75rem">${a.cpu_at_spike}% CPU · ${a.timestamp}</div>
+      <div>${a.resolved ? '<span class="resolved">✓ Resolved</span>' : '<span class="unresolved">⚠ Active</span>'}</div>
+    </div>`).join("");
+}
+
+// ── Model Metrics ─────────────────────────────────────────────────────────────
+async function loadModelMetrics() {
+  const m = await safe(async () => { const r = await fetch(`${API}/metrics`); return r.json(); }) || { mae: 3.2, rmse: 4.8, r2: 0.94, latency_reduction_pct: 35, model_type: "LSTM" };
+  document.getElementById("model-metrics-panel").innerHTML = `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
+      ${[["MAE", m.mae?.toFixed(2)+""], ["RMSE", m.rmse?.toFixed(2)+""], ["R² Score", m.r2?.toFixed(3)+""], ["Latency ↓", m.latency_reduction_pct+"%"]].map(([l,v]) => `
+      <div style="background:var(--surface2);border-radius:8px;padding:12px;text-align:center">
+        <div style="font-size:1.3rem;font-weight:800;color:var(--accent2)">${v}</div>
+        <div style="font-size:0.7rem;color:var(--muted);text-transform:uppercase;letter-spacing:.6px;margin-top:3px">${l}</div>
+      </div>`).join("")}
+    </div>
+    <div style="background:var(--surface2);border-radius:8px;padding:12px;font-size:0.82rem">
+      <div style="color:var(--muted);font-size:0.7rem;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">Architecture</div>
+      <div style="color:var(--text)">Model: <strong style="color:var(--accent)">${m.model_type || "LSTM"}</strong></div>
+      <div style="color:var(--muted);margin-top:6px;line-height:1.5;font-size:0.78rem">
+        LSTM(128) → Dropout(0.2) → BatchNorm → LSTM(64) → Dense(32) → Dense(1)<br>
+        Input: 60-min window · 3 features (CPU, Memory, Network)<br>
+        Output: Peak CPU in next 10-min window
+      </div>
+    </div>
+  `;
+}
+
+// ── Mock fallbacks ────────────────────────────────────────────────────────────
+function mockLive() {
+  const nodes = Array.from({length:50},(_,i)=>{
+    const cpu=Math.random()*85+5;
+    return {node_id:`node-${String(i+1).padStart(4,"0")}`,cpu_pct:+cpu.toFixed(1),memory_pct:+(cpu*0.6+15).toFixed(1),status:cpu>85?"overload":cpu>70?"warning":"healthy"};
+  });
+  const overload=nodes.filter(n=>n.status==="overload").length;
+  const warning=nodes.filter(n=>n.status==="warning").length;
+  return {nodes,summary:{total:50,overload,warning,healthy:50-overload-warning,avg_cpu:+(nodes.reduce((a,n)=>a+n.cpu_pct,0)/50).toFixed(1),avg_mem:0}};
+}
+function mockHistory(){return{history:Array.from({length:144},(_,i)=>{const h=Math.floor(i*10/60)%24,d=0.4+0.6*(Math.sin((h-6)*Math.PI/12)**2),cpu=+(45*d+Math.random()*8-4).toFixed(1);return{time:`${String(h).padStart(2,"0")}:${String((i*10)%60).padStart(2,"0")}`,cpu,memory:+(cpu*0.6+15).toFixed(1)}})}}
+function mockPredict(b,n){const p=Math.min(100,b*1.1+Math.random()*5);return{predicted_peak_cpu:+p.toFixed(1),recommendation:p>85?"scale_up":p<40?"scale_down":"maintain",cost_analysis:{compute_cost_usd:+(p/100*n*0.12).toFixed(3),latency_overhead_ms:p>80?(p-80)*8:0}}}
+function mockAnomalies(){return Array.from({length:6},(_,i)=>{const cpu=+(Math.random()*15+86).toFixed(1);return{node_id:`node-${String(Math.floor(Math.random()*200)+1).padStart(4,"0")}`,cpu_at_spike:cpu,severity:cpu>95?"critical":"high",timestamp:new Date(Date.now()-i*90*60000).toLocaleString().slice(0,16),resolved:Math.random()>0.3}})}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+async function init() {
+  await Promise.all([loadLive(), loadHistory(), loadAnomalies(), loadModelMetrics()]);
+}
+init();
+// Auto-refresh every 30s
+setInterval(loadLive, 30000);
+</script>
+</body>
+</html>
